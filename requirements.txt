@@ -1,0 +1,8 @@
+PyQt5
+PyQtGraph
+numpy
+serial
+pygame
+pyopengl
+cx_Freeze
+idna
