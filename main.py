@@ -104,14 +104,12 @@ class GraphWidget(QWidget):
         Each key corresponds to a column and contains a list of values
         for that metric.
         '''
-        self._values = dict.fromkeys(self._columns, [])
+        
+        self._values = {k: [] for k in self._columns}
         with open(filepath, 'r') as report:
-            skip_columns = True
-            for line in report.readlines()[2:]:
-                row = list(filter(None, line.split()))
-                if skip_columns:
-                    skip_columns = False
-                    continue                
+            for line in report.readlines()[3:]:
+                row = list(filter(None, line.split()))   
+                
                 for i, val in enumerate(row):
                     self._values[self._columns[i]].append(float(val))
 
@@ -124,20 +122,36 @@ class GraphWidget(QWidget):
         # Plot one graph for each column excepting the time
         self._plotwidgets = []
         self._plots = []
-        for idx, column in enumerate(self._columns[1:]):
+        time_column = self._columns[0]
+        for column in self._columns[1:]:
+            # Calculate row index
+            row_idx = 2 + math.floor((len(self._plotwidgets)) / 2)
+
             # Create widget in grid layout
-            self._plotwidgets.append(pg.PlotWidget(self))
-            self._plotwidgets[idx].setTitle(f"{column} x {self._columns[0]}")
-            self._plotwidgets[idx].setLabel('left', column)
-            self._plotwidgets[idx].setLabel('bottom', self._columns[0])
+            plot_widget = pg.PlotWidget(self)
+            plot_widget.setTitle(f"{column} x {time_column}")
+            plot_widget.setLabel('left', column)
+            plot_widget.setLabel('bottom', time_column)
 
             # Display graph
             # TODO change plot style (really bad plot too many points)
-            self._plots.append(self._plotwidgets[idx].plot(pen='#3d2163', symbolBrush='#3d2163', symbolPen='w'))
-            self._plots[idx].setData(np.array(self._values[self._columns[0]]), np.array(self._values[column]))
-            self._layout.addWidget(self._plotwidgets[idx], 2 + math.floor(idx/2), idx%2)
+            plot = plot_widget.plot(pen='#3d2163', symbolBrush='#3d2163', symbolPen='w')
+            plot.setData(np.array(self._values[time_column]), np.array(self._values[column]))
+            self._layout.addWidget(plot_widget, row_idx, len(self._plotwidgets) % 2)
+
+            self._plotwidgets.append(plot_widget)
+            self._plots.append(plot)
 
             # Add statistics for graph
+            data = np.array(self._values[column])
+            mean = np.mean(data)
+            median = np.median(data)
+            max_val = np.max(data)
+            min_val = np.min(data)
+
+            stats_label = QLabel(self)
+            stats_label.setText(f"Mean: {mean:.2f}, Median: {median:.2f}, Max: {max_val:.2f}, Min: {min_val:.2f}")
+            self._layout.addWidget(stats_label, row_idx + 1, len(self._plotwidgets) % 2)
 
     def _load_graphs(self):
         print(f"Loading graphs from file {self._selected_file}")
