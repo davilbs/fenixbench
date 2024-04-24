@@ -41,6 +41,7 @@ options = {
     'build_exe': { 
         'packages': packages,   
         'zip_includes':include_OpenGL(),
+        'include_files':["./fenix.png"],
     },    
 }
 

@@ -21,9 +21,14 @@ class GraphWidget(QWidget):
     def _load_start(self):
         # Set initial layout for reading file
         self._layout = QGridLayout(self)
-        # self._layout.setRowStretch(3, 1)
         
         # TODO: Load fenix Logo at center
+        self.logo_label = QLabel(self)
+        pixmap = QtGui.QPixmap('fenix.png')
+        self.logo_label.setPixmap(pixmap)
+        self.logo_label.setAlignment(Qt.AlignCenter)
+        self._layout.addWidget(self.logo_label, 0, 0, 1, 2)  # Adjust the position as needed
+
         self.parent().setWindowTitle("BancadaInterface")
 
         # Receive filepath for csv file
@@ -32,17 +37,22 @@ class GraphWidget(QWidget):
         self.filepath_widget = QLineEdit(self)
         self.filepath_widget.setPlaceholderText("Please insert path to data file")
         self.filepath_widget.textChanged.connect(self._check_file)
-        self._layout.addWidget(self.filepath_widget, 0, 0)
+        self._layout.addWidget(self.filepath_widget, 1, 0)
         self.error_message = QLabel(self)
         self.error_message.setText(None)
-        self._layout.addWidget(self.error_message, 1, 0)
+        self._layout.addWidget(self.error_message, 2, 0)
 
         self.confirm_button = QPushButton("Confirm", self)
         self.confirm_button.setMaximumWidth(100)
         self.confirm_button.clicked.connect(self._confirm_file)
-        self._layout.addWidget(self.confirm_button, 0, 1)
+        self._layout.addWidget(self.confirm_button, 1, 1)
 
-    def _check_file(self, filepath: str):
+        # Initialize lists for graph widgets and plots
+        self._plotwidgets = []
+        self._plots = []
+        self._stat_labels = []
+
+    def _check_file(self, filepath):
         '''
         Updates the current entered filepath in the search bar
         '''
@@ -57,7 +67,7 @@ class GraphWidget(QWidget):
         else:
             self._selected_file = filepath
 
-    def _set_error_message(self, msg: str):
+    def _set_error_message(self, msg):
         '''
         Sets the content in the label for error reporting
         '''
@@ -79,10 +89,11 @@ class GraphWidget(QWidget):
             self._set_error_message("Please enter a valid file")
         else:
             self._selected_file = checking_file
+            self._remove_graphs()
             self._load_graphs()
             self._is_selected = True
             
-    def _read_header(self, filepath: str):
+    def _read_header(self, filepath):
         '''
         Gets the header content from the data files.
         Expected format:
@@ -98,7 +109,7 @@ class GraphWidget(QWidget):
 
             self._columns = list(filter(None, report.readline().split()))
 
-    def _read_data(self, filepath: str):
+    def _read_data(self, filepath):
         '''
         Reads the columns data and stores in a dictionary.
         Each key corresponds to a column and contains a list of values
@@ -113,19 +124,20 @@ class GraphWidget(QWidget):
                 for i, val in enumerate(row):
                     self._values[self._columns[i]].append(float(val))
 
-    def _load_visualization(self):
-        # self._graph_layout = QGridLayout(self)
-        # self._layout.addLayout(self._graph_layout, 2, 0, 1, 0)
-        # Plot the test information including the test name
-        self._info_display = QVBoxLayout(self)
-        
+    def _load_visualization(self, start_time, end_time):
         # Plot one graph for each column excepting the time
-        self._plotwidgets = []
-        self._plots = []
         time_column = self._columns[0]
+        if self._start < 0:
+            self._start = self._values[time_column][0]
+        if self._end < 0 or self._end < self._start:
+            self._end = self._values[time_column][-1]
+            
+        # Filter data based on time window
+        mask = (np.array(self._values[time_column]) >= self._start) & (np.array(self._values[time_column]) <= self._end)
+        
         for column in self._columns[1:]:
             # Calculate row index
-            row_idx = 2 + math.floor((len(self._plotwidgets)) / 2)
+            row_idx = 2 * (2 + math.floor((len(self._plotwidgets)) / 2))
 
             # Create widget in grid layout
             plot_widget = pg.PlotWidget(self)
@@ -134,16 +146,12 @@ class GraphWidget(QWidget):
             plot_widget.setLabel('bottom', time_column)
 
             # Display graph
-            # TODO change plot style (really bad plot too many points)
             plot = plot_widget.plot(pen='#3d2163', symbolBrush='#3d2163', symbolPen='w')
-            plot.setData(np.array(self._values[time_column]), np.array(self._values[column]))
+            plot.setData(np.array(self._values[time_column])[mask], np.array(self._values[column])[mask])
             self._layout.addWidget(plot_widget, row_idx, len(self._plotwidgets) % 2)
 
-            self._plotwidgets.append(plot_widget)
-            self._plots.append(plot)
-
             # Add statistics for graph
-            data = np.array(self._values[column])
+            data = np.array(self._values[column])[mask]
             mean = np.mean(data)
             median = np.median(data)
             max_val = np.max(data)
@@ -153,11 +161,68 @@ class GraphWidget(QWidget):
             stats_label.setText(f"Mean: {mean:.2f}, Median: {median:.2f}, Max: {max_val:.2f}, Min: {min_val:.2f}")
             self._layout.addWidget(stats_label, row_idx + 1, len(self._plotwidgets) % 2)
 
+            # Add the label to the list
+            self._plotwidgets.append(plot_widget)
+            self._plots.append(plot)
+            self._stat_labels.append(stats_label)
+
+    def _load_window_inputs(self):
+        self._start = -1
+        self._end = -1
+        # Create QLineEdit for start value
+        self.start_input = QLineEdit(self)
+        self.start_input.setPlaceholderText("Enter start time")
+        self._layout.addWidget(self.start_input, 2, 0)  # Adjust the position as needed
+        self.start_input.textChanged.connect(self._update_start)
+
+        # Create QLineEdit for end value
+        self.end_input = QLineEdit(self)
+        self.end_input.setPlaceholderText("Enter end time")
+        self._layout.addWidget(self.end_input, 2, 1)  # Adjust the position as needed
+        self.end_input.textChanged.connect(self._update_end)
+
+    def _update_start(self, text):
+        try:
+            self._start = float(text)
+            self._remove_graphs()
+            self._load_visualization(self._start, self._end)
+        except ValueError:
+            pass  # Invalid number, ignore
+
+    def _update_end(self, text):
+        try:
+            self._end = float(text)
+            self._remove_graphs()
+            self._load_visualization(self._start, self._end)
+        except ValueError:
+            pass  # Invalid number, ignore
+
     def _load_graphs(self):
         print(f"Loading graphs from file {self._selected_file}")
         self._read_header(self._selected_file)
         self._read_data(self._selected_file)
-        self._load_visualization()
+        self._load_window_inputs()
+        self._load_visualization(self._start, self._end)
+
+    def _remove_graphs(self):
+        for plot_widget in self._plotwidgets:
+            # Remove the widget from the layout
+            self._layout.removeWidget(plot_widget)
+            # Optional: delete the widget
+            plot_widget.setParent(None)
+            plot_widget.deleteLater()
+
+        for stat_label in self._stat_labels:
+            # Remove the label from the layout
+            self._layout.removeWidget(stat_label)
+            # Optional: delete the label
+            stat_label.setParent(None)
+            stat_label.deleteLater()
+
+        # Clear the lists
+        self._plotwidgets.clear()
+        self._plots.clear()
+        self._stat_labels.clear()
 
 
 if __name__ == "__main__":
