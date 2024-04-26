@@ -6,6 +6,8 @@ import pyqtgraph as pg
 from PyQt5.QtWidgets import QApplication, QMainWindow, QGridLayout, QWidget, QPushButton, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit
 from PyQt5.QtCore import Qt
 from PyQt5 import QtGui
+from scipy.optimize import least_squares
+import numpy as np
 
 # Check operating system
 CURR_OS = 0
@@ -22,7 +24,6 @@ class GraphWidget(QWidget):
         # Set initial layout for reading file
         self._layout = QGridLayout(self)
         
-        # TODO: Load fenix Logo at center
         self.logo_label = QLabel(self)
         pixmap = QtGui.QPixmap('fenix.png')
         self.logo_label.setPixmap(pixmap)
@@ -71,6 +72,7 @@ class GraphWidget(QWidget):
         '''
         Sets the content in the label for error reporting
         '''
+        print(msg)
         self.error_message.setText(msg)
     
     def _confirm_file(self):
@@ -123,8 +125,52 @@ class GraphWidget(QWidget):
                 
                 for i, val in enumerate(row):
                     self._values[self._columns[i]].append(float(val))
+        self._preprocess_data()
 
-    def _load_visualization(self, start_time, end_time):
+    def _preprocess_data(self):
+        # Filter data to use only 0.1 seconds intervals
+        time_column = self._columns[0]
+        time_values = np.array(self._values[time_column])
+        new_time_values = np.arange(time_values[0], time_values[-1], 0.1)
+
+        for column in self._columns[1:]:
+            column_values = np.array(self._values[column])
+            new_column_values = []
+            for i in range(len(new_time_values) - 1):
+                mask = (time_values >= new_time_values[i]) & (time_values < new_time_values[i+1])
+                interval_values = column_values[mask]
+                # Use the actual values instead of the mean
+                new_column_values.append(np.mean(interval_values))
+
+            self._values[column] = new_column_values
+
+        self._values[time_column] = new_time_values[:-1].tolist()
+
+    def _update_visualization(self):
+         # Plot one graph for each column excepting the time
+        time_column = self._columns[0]
+        if self._start < 0:
+            self._start = self._values[time_column][0]
+        if self._end < 0 or self._end < self._start:
+            self._end = self._values[time_column][-1]
+            
+        # Filter data based on time window
+        mask = (np.array(self._values[time_column]) >= self._start) & (np.array(self._values[time_column]) <= self._end)
+        
+        for n, plot in enumerate(self._plots):
+            # Display graph
+            plot.setData(np.array(self._values[time_column])[mask], np.array(self._values[self._columns[n+1]])[mask])
+
+            # Add statistics for graph
+            data = np.array(self._values[self._columns[n+1]])[mask]
+            mean = np.mean(data)
+            median = np.median(data)
+            max_val = np.max(data)
+            min_val = np.min(data)
+
+            self._stat_labels[n].setText(f"Mean: {mean:.2f}, Median: {median:.2f}, Max: {max_val:.2f}, Min: {min_val:.2f}")
+
+    def _load_visualization(self):
         # Plot one graph for each column excepting the time
         time_column = self._columns[0]
         if self._start < 0:
@@ -146,7 +192,7 @@ class GraphWidget(QWidget):
             plot_widget.setLabel('bottom', time_column)
 
             # Display graph
-            plot = plot_widget.plot(pen='#3d2163', symbolBrush='#3d2163', symbolPen='w')
+            plot = plot_widget.plot(pen='#3d2163', symbolBrush='#3d2163', symbolSize=3)
             plot.setData(np.array(self._values[time_column])[mask], np.array(self._values[column])[mask])
             self._layout.addWidget(plot_widget, row_idx, len(self._plotwidgets) % 2)
 
@@ -184,25 +230,29 @@ class GraphWidget(QWidget):
     def _update_start(self, text):
         try:
             self._start = float(text)
-            self._remove_graphs()
-            self._load_visualization(self._start, self._end)
+            self._update_visualization()
         except ValueError:
-            pass  # Invalid number, ignore
+            if len(text) == 0:
+                self._start = 0
+                self._update_visualization()
+            # Invalid number, ignore
 
     def _update_end(self, text):
         try:
             self._end = float(text)
-            self._remove_graphs()
-            self._load_visualization(self._start, self._end)
+            self._update_visualization()
         except ValueError:
-            pass  # Invalid number, ignore
+            if len(text) == 0:
+                self._end = -1
+                self._update_visualization()
+            # Invalid number, ignore
 
     def _load_graphs(self):
-        print(f"Loading graphs from file {self._selected_file}")
+        print(f"Loading data from file {self._selected_file}")
         self._read_header(self._selected_file)
         self._read_data(self._selected_file)
         self._load_window_inputs()
-        self._load_visualization(self._start, self._end)
+        self._load_visualization()
 
     def _remove_graphs(self):
         for plot_widget in self._plotwidgets:
