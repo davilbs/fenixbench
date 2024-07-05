@@ -14,6 +14,11 @@ CURR_OS = 0
 if os.name == "nt":
     CURR_OS = 1
 
+# TODO add file browsing on application
+# TODO add error handling for file reading 
+# TODO add data processing to best fit the graph
+# TODO add derivative calculation
+
 class GraphWidget(QWidget):
     def __init__(self, parent=None):
         super(GraphWidget, self).__init__(parent)
