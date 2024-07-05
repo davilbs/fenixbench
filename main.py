@@ -3,11 +3,11 @@ import sys
 import numpy as np
 import math
 import pyqtgraph as pg
-from PyQt5.QtWidgets import QApplication, QMainWindow, QGridLayout, QWidget, QPushButton, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit
+from PyQt5.QtWidgets import QApplication, QMainWindow, QGridLayout, QWidget, QPushButton, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QFileDialog, QListWidget
 from PyQt5.QtCore import Qt
 from PyQt5 import QtGui
-from scipy.optimize import least_squares
 import numpy as np
+import pandas as pd
 
 # Check operating system
 CURR_OS = 0
@@ -37,36 +37,71 @@ class GraphWidget(QWidget):
 
         self.parent().setWindowTitle("BancadaInterface")
 
+        # File selection HBox
+        self._file_selection_hbox = QHBoxLayout()
+        self._layout.addLayout(self._file_selection_hbox, 1, 0, 1, 2)
+        
         # Receive filepath for csv file
         self._selected_file = ""
         self._is_selected = False
         self.filepath_widget = QLineEdit(self)
         self.filepath_widget.setPlaceholderText("Please insert path to data file")
         self.filepath_widget.textChanged.connect(self._check_file)
-        self._layout.addWidget(self.filepath_widget, 1, 0)
+        self._file_selection_hbox.addWidget(self.filepath_widget)
+
+        self._file_browser_btn = QPushButton('Browse')
+        self._file_browser_btn.setMaximumWidth(100)
+        self._file_browser_btn.setMinimumWidth(100)
+        self._file_browser_btn.clicked.connect(self._open_file_dialog)
+        self._file_selection_hbox.addWidget(self._file_browser_btn)
+
+        self._confirm_button = QPushButton("Load Data", self)
+        self._confirm_button.setMaximumWidth(100)
+        self._confirm_button.setMinimumWidth(100)
+        self._confirm_button.clicked.connect(self._confirm_file)
+        self._file_selection_hbox.addWidget(self._confirm_button)
+
+        self._export_button_added = False
+
+        # Error message label
         self.error_message = QLabel(self)
         self.error_message.setText(None)
         self._layout.addWidget(self.error_message, 2, 0)
 
-        self.confirm_button = QPushButton("Confirm", self)
-        self.confirm_button.setMaximumWidth(100)
-        self.confirm_button.clicked.connect(self._confirm_file)
-        self._layout.addWidget(self.confirm_button, 1, 1)
 
         # Initialize lists for graph widgets and plots
         self._plotwidgets = []
         self._plots = []
         self._stat_labels = []
 
+    def _open_file_dialog(self):
+        dialog = QFileDialog(self)
+        dialog.setDirectory(os.getcwd())
+        dialog.setFileMode(QFileDialog.FileMode.ExistingFiles)
+        dialog.setNameFilter("Text files (*.txt *.TXT);;CSV files (*.csv)")
+        dialog.setViewMode(QFileDialog.ViewMode.List)
+        if dialog.exec():
+            filenames = dialog.selectedFiles()
+            if filenames:
+                self.filepath_widget.setText(filenames[0])
+                self._check_file(filenames[0])
+
+    def _export_data(self):
+        print("Exporting data...")
+        # print(self._values)
+        # print(self._columns)
+        mask = (np.array(self._values[self._columns[0]]) >= self._start) & (np.array(self._values[self._columns[0]]) <= self._end)
+        for column in self._columns[1:]:
+            df = pd.DataFrame({self._columns[0]: np.array(self._values[self._columns[0]])[mask], column: np.array(self._values[column])[mask]})
+            df.to_csv(f"Values_{column}.csv", index=False)
+        print("Data exported successfully!")
+
     def _check_file(self, filepath):
         '''
         Updates the current entered filepath in the search bar
         '''
-        if not os.path.abspath(".") in filepath:
-            if CURR_OS == 0:
-                filepath = os.path.abspath(".") + "/" + filepath.replace("\\", "/").strip("/")
-            elif CURR_OS == 1:
-                filepath = os.path.abspath(".") + "\\" + filepath.replace("/", "\\").strip("\\")
+        if not os.path.isfile(filepath):
+            self._set_error_message("Please enter a valid file path")
 
         if self._is_selected:
             self._new_filepath = filepath
@@ -122,7 +157,6 @@ class GraphWidget(QWidget):
         Each key corresponds to a column and contains a list of values
         for that metric.
         '''
-        
         self._values = {k: [] for k in self._columns}
         with open(filepath, 'r') as report:
             for line in report.readlines()[3:]:
@@ -136,7 +170,17 @@ class GraphWidget(QWidget):
         # Filter data to use only 0.1 seconds intervals
         time_column = self._columns[0]
         time_values = np.array(self._values[time_column])
-        new_time_values = np.arange(time_values[0], time_values[-1], 0.1)
+        largest_smallest_interval = 0
+        for n, v in enumerate(time_values):
+            if n == 0:
+                continue
+            interval = v - time_values[n-1]
+            if interval > largest_smallest_interval:
+                largest_smallest_interval = interval
+
+        print(largest_smallest_interval)
+
+        new_time_values = np.arange(time_values[0], time_values[-1], largest_smallest_interval)
 
         for column in self._columns[1:]:
             column_values = np.array(self._values[column])
@@ -154,9 +198,9 @@ class GraphWidget(QWidget):
     def _update_visualization(self):
          # Plot one graph for each column excepting the time
         time_column = self._columns[0]
-        if self._start < 0:
+        if self._start < self._values[time_column][0]:
             self._start = self._values[time_column][0]
-        if self._end < 0 or self._end < self._start:
+        if self._end < self._values[time_column][0] or self._end < self._start:
             self._end = self._values[time_column][-1]
             
         # Filter data based on time window
@@ -178,9 +222,9 @@ class GraphWidget(QWidget):
     def _load_visualization(self):
         # Plot one graph for each column excepting the time
         time_column = self._columns[0]
-        if self._start < 0:
+        if self._start < self._values[time_column][0]:
             self._start = self._values[time_column][0]
-        if self._end < 0 or self._end < self._start:
+        if self._end < self._values[time_column][0] or self._end < self._start:
             self._end = self._values[time_column][-1]
             
         # Filter data based on time window
@@ -218,8 +262,8 @@ class GraphWidget(QWidget):
             self._stat_labels.append(stats_label)
 
     def _load_window_inputs(self):
-        self._start = -1
-        self._end = -1
+        self._start = self._values[self._columns[0]][0]
+        self._end = self._values[self._columns[0]][-1]
         # Create QLineEdit for start value
         self.start_input = QLineEdit(self)
         self.start_input.setPlaceholderText("Enter start time")
@@ -238,7 +282,7 @@ class GraphWidget(QWidget):
             self._update_visualization()
         except ValueError:
             if len(text) == 0:
-                self._start = 0
+                self._start = self._values[self._columns[0]][0]
                 self._update_visualization()
             # Invalid number, ignore
 
@@ -252,10 +296,20 @@ class GraphWidget(QWidget):
                 self._update_visualization()
             # Invalid number, ignore
 
+    def _add_export_button(self):
+        if not self._export_button_added:
+            self._export_button_added = True
+            self._export_data_btn = QPushButton("Export Data", self)
+            self._export_data_btn.setMaximumWidth(100)
+            self._export_data_btn.setMinimumWidth(100)
+            self._export_data_btn.clicked.connect(self._export_data)
+            self._file_selection_hbox.addWidget(self._export_data_btn)
+
     def _load_graphs(self):
         print(f"Loading data from file {self._selected_file}")
         self._read_header(self._selected_file)
         self._read_data(self._selected_file)
+        self._add_export_button()
         self._load_window_inputs()
         self._load_visualization()
 
